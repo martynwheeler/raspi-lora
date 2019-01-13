@@ -6,7 +6,7 @@ from random import random
 import RPi.GPIO as GPIO
 import spidev
 
-from lora_constants import *
+from .lora_constants import *
 
 
 class LoRa(object):
