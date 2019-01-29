@@ -1,1 +1,1 @@
-from .lora import LoRa
+from .lora import LoRa, ModemConfig

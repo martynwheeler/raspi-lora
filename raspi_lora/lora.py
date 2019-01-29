@@ -1,4 +1,5 @@
 import time
+from enum import Enum
 import math
 from collections import namedtuple
 from random import random
@@ -9,8 +10,17 @@ import spidev
 from .lora_constants import *
 
 
+class ModemConfig(Enum):
+    Bw125Cr45Sf128 = (0x72, 0x74, 0x04)
+    Bw500Cr45Sf128 = (0x92, 0x74, 0x04)
+    Bw31_25Cr48Sf512 = (0x48, 0x94, 0x04)
+    Bw125Cr48Sf4096 = (0x78, 0xc4, 0x0c)
+
+
 class LoRa(object):
-    def __init__(self, channel, interrupt, this_address, freq=915, tx_power=10, acks=False, crypto=None):
+    def __init__(self, channel, interrupt, this_address, freq=915, tx_power=14,
+                 modem_config=ModemConfig.Bw125Cr45Sf128, acks=False, crypto=None):
+
         self._channel = channel
         self._interrupt = interrupt
 
@@ -18,6 +28,7 @@ class LoRa(object):
         self._cad = None
         self._freq = freq
         self._tx_power = tx_power
+        self._modem_config = modem_config
         self._acks = acks
 
         self._this_address = this_address
@@ -52,9 +63,9 @@ class LoRa(object):
         self.set_mode_idle()
 
         # set modem config (Bw125Cr45Sf128)
-        self._spi_write(REG_1D_MODEM_CONFIG1, 0x72)
-        self._spi_write(REG_1E_MODEM_CONFIG2, 0x74)
-        self._spi_write(REG_26_MODEM_CONFIG3, 0x04)
+        self._spi_write(REG_1D_MODEM_CONFIG1, self._modem_config.value[0])
+        self._spi_write(REG_1E_MODEM_CONFIG2, self._modem_config.value[1])
+        self._spi_write(REG_26_MODEM_CONFIG3, self._modem_config.value[2])
 
         # set preamble length (8)
         self._spi_write(REG_20_PREAMBLE_MSB, 0)
