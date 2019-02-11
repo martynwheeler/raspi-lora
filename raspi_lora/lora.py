@@ -1,5 +1,4 @@
 import time
-from enum import Enum
 import math
 from collections import namedtuple
 from random import random
@@ -8,13 +7,6 @@ import RPi.GPIO as GPIO
 import spidev
 
 from .lora_constants import *
-
-
-class ModemConfig(Enum):
-    Bw125Cr45Sf128 = (0x72, 0x74, 0x04)
-    Bw500Cr45Sf128 = (0x92, 0x74, 0x04)
-    Bw31_25Cr48Sf512 = (0x48, 0x94, 0x04)
-    Bw125Cr48Sf4096 = (0x78, 0xc4, 0x0c)
 
 
 class LoRa(object):
@@ -37,8 +29,7 @@ class LoRa(object):
         self._last_payload = None
         self.crypto = crypto
 
-        self.cad_timeout = 10
-        self.send_retries = 2
+        self.cad_timeout = 1
         self.wait_packet_sent_timeout = 0.5
         self.retry_timeout = 0.5
 
@@ -55,7 +46,7 @@ class LoRa(object):
         time.sleep(0.1)
 
         assert self._spi_read(REG_01_OP_MODE) == (MODE_SLEEP | LONG_RANGE_MODE), \
-            "LoRa initialization failed"
+            "LoRa radio initialization failed"
 
         self._spi_write(REG_0E_FIFO_TX_BASE_ADDR, 0)
         self._spi_write(REG_0F_FIFO_RX_BASE_ADDR, 0)
@@ -96,64 +87,60 @@ class LoRa(object):
         pass
 
     def sleep(self):
-        if self._mode != ModeSleep:
+        if self._mode != MODE_SLEEP:
             self._spi_write(REG_01_OP_MODE, MODE_SLEEP)
-            self._mode = ModeSleep
+            self._mode = MODE_SLEEP
 
     def set_mode_tx(self):
-        if self._mode != ModeTx:
+        if self._mode != MODE_TX:
             self._spi_write(REG_01_OP_MODE, MODE_TX)
             self._spi_write(REG_40_DIO_MAPPING1, 0x40)  # Interrupt on TxDone
-            self._mode = ModeTx
+            self._mode = MODE_TX
 
     def set_mode_rx(self):
-        if self._mode != ModeRx:
+        if self._mode != MODE_RXCONTINUOUS:
             self._spi_write(REG_01_OP_MODE, MODE_RXCONTINUOUS)
             self._spi_write(REG_40_DIO_MAPPING1, 0x00)  # Interrupt on RxDone
-            self._mode = ModeRx
+            self._mode = MODE_RXCONTINUOUS
 
     def set_mode_cad(self):
-        if self._mode != ModeCad:
-            self._spi_write(REG_01_OP_MODE, MODE_CAD)
-            self._spi_write(REG_40_DIO_MAPPING1, 0x80)  # Interrupt on CadDone
-            self._mode = ModeCad
-
-    def _is_channel_active(self):
-        self.set_mode_cad()
-
-        while self._mode == ModeCad:
-            yield
-
-        return self._cad
+        self.set_mode_idle()
+        time.sleep(0.1)
+        self._spi_write(REG_01_OP_MODE, MODE_CAD)
+        self._spi_write(REG_40_DIO_MAPPING1, 0x80)  # Interrupt on CadDone
+        self._mode = MODE_CAD
 
     def wait_cad(self):
+        # Set the radio to CAD mode to check for channel activity
+        # self._cad will be True if activity was detected
         if not self.cad_timeout:
             return True
 
-        start = time.time()
-        for status in self._is_channel_active():
-            if time.time() - start < self.cad_timeout:
-                return False
+        self.set_mode_cad()
 
-            if status is None:
-                time.sleep(0.1)
-                continue
-            else:
-                return status
+        start = time.time()
+        while time.time() - start < self.cad_timeout:
+            if self._mode == MODE_STDBY and self._cad:
+                # Channel activity was detected, so we'll check again
+                self.set_mode_cad()
+            if self._mode == MODE_STDBY and not self._cad:
+                return True
+            time.sleep(0.1)
+        return False
 
     def wait_packet_sent(self):
-        # wait for `_handle_interrupt` to switch the mode back
+        # wait for `_handle_interrupt` to switch the mode back from MODE_TX
         start = time.time()
         while time.time() - start < self.wait_packet_sent_timeout:
-            if self._mode != ModeTx:
+            if self._mode != MODE_TX:
                 return True
 
         return False
 
     def set_mode_idle(self):
-        if self._mode != ModeIdle:
+        if self._mode != MODE_STDBY:
             self._spi_write(REG_01_OP_MODE, MODE_STDBY)
-            self._mode = ModeIdle
+            self._mode = MODE_STDBY
 
     def send(self, data, header_to, header_id=0, header_flags=0):
         self.wait_packet_sent()
@@ -236,7 +223,7 @@ class LoRa(object):
     def _handle_interrupt(self, channel):
         irq_flags = self._spi_read(REG_12_IRQ_FLAGS)
 
-        if self._mode == ModeRx and (irq_flags & RX_DONE):
+        if self._mode == MODE_RXCONTINUOUS and (irq_flags & RX_DONE):
             packet_len = self._spi_read(REG_13_RX_NB_BYTES)
             self._spi_write(REG_0D_FIFO_ADDR_PTR, self._spi_read(REG_10_FIFO_RX_CURRENT_ADDR))
 
@@ -263,10 +250,11 @@ class LoRa(object):
                 header_flags = packet[3]
                 message = bytes(packet[4:]) if packet_len > 4 else b''
 
-                if self._this_address and self._this_address != header_to:
+                if self._this_address not in [header_to, BROADCAST_ADDRESS]:
+                    # Message not for us
                     return
 
-                if self.crypto and len(message) % 16 == 0:
+                if self.crypto and len(message) and len(message) % 16 == 0:
                     message = self._decrypt(message)
 
                 if self._acks and header_to == self._this_address and not header_flags & FLAGS_ACK:
@@ -282,10 +270,10 @@ class LoRa(object):
                 if not header_flags & FLAGS_ACK:
                     self.on_recv(self._last_payload)
 
-        elif self._mode == ModeTx and (irq_flags & TX_DONE):
+        elif self._mode == MODE_TX and (irq_flags & TX_DONE):
             self.set_mode_idle()
 
-        elif self._mode == ModeCad and (irq_flags & CAD_DONE):
+        elif self._mode == MODE_CAD and (irq_flags & CAD_DONE):
             self._cad = irq_flags & CAD_DETECTED
             self.set_mode_idle()
 
