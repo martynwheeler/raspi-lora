@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name='raspi-lora',
-    version='0.1',
+    version='0.2',
     packages=['raspi_lora'],
     url='https://gitlab.com/the-plant/raspi-lora',
     license='MIT',
