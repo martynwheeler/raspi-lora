@@ -25,6 +25,8 @@ def on_recv(payload):
 lora = LoRa(0, 17, 2, modem_config=ModemConfig.Bw125Cr45Sf128, tx_power=14, acks=True)
 lora.on_recv = on_recv
 
+lora.set_mode_rx()
+
 # Send a message to a recipient device with address 10
 # Retry sending the message twice if we don't get an  acknowledgment from the recipient
 message = "Hello there!"
@@ -33,18 +35,21 @@ if status is True:
     print("Message sent!")
 else:
     print("No acknowledgment from recipient")
+    
+# And remember to call this as your program exits...
+lora.close()
 ```
 
 ### Encryption
-If you'd like to send and receive encrypted packets, you'll need to install the [PyCrypto](https://www.dlitz.net/software/pycrypto/) package. If you're working with devices running RadioHead with RHEncryptedDriver, I recommend using the AES cipher.
+If you'd like to send and receive encrypted packets, you'll need to install the [PyCryptodome](https://pycryptodome.readthedocs.io) package. If you're working with devices running RadioHead with RHEncryptedDriver, I recommend using the AES cipher.
 ```
-pip install pycrypto
+pip install pycryptodome
 ```
 
 and in your code:
 ```
 from Crypto.Cipher import AES
-crypto = AES.new("my-secret-encryption-key")
+crypto = AES.new(b"my-secret-encryption-key", AES.MODE_EAX)
 ```
 then pass in `crypto` when instantiating the `LoRa` object:
 ```
@@ -57,7 +62,7 @@ lora = LoRa(0, 17, 2, crypto=crypto)
 LoRa(channel, interrupt, this_address, freq=915, tx_power=14,
       modem_config=ModemConfig.Bw125Cr45Sf128, acks=False, crypto=None)
 ```
-**`channel`** SPI channel to use (either 0 or 1, if your LoRa radio if connected to CE0 or CE1, respectively)
+**`channel`** SPI channel to use (either 0 or 1, if your LoRa radio is connected to CE0 or CE1, respectively)
 
 **`interrupt`** GPIO pin (BCM-style numbering) to use for the interrupt
 
@@ -69,22 +74,24 @@ LoRa(channel, interrupt, this_address, freq=915, tx_power=14,
 
 **`model_config`** Modem configuration. See [RadioHead docs](http://www.airspayce.com/mikem/arduino/RadioHead/classRH__RF95.html#ab9605810c11c025758ea91b2813666e3). Default to Bw125Cr45Sf128.
 
+**`receive_all`** Receive messages regardless of the destination address
+
 **`acks`** If `True`, send an acknowledgment packet when a message is received and wait for an acknowledgment when transmitting a message. This is equivalent to using RadioHead's RHReliableDatagram
 
-**`crypto`** An instance of [PyCrypto Cipher.AES](https://www.dlitz.net/software/pycrypto/api/current/Crypto.Cipher.AES-module.html) (see above example)
+**`crypto`** An instance of PyCryptodome Cipher.AES (see above example)
 
 
 ##### Other options:
 A `LoRa` instance also has the following attributes that can be changed:
-- **cad_timeout** Timeout for channel activity detection. Default is 1 second
-- **retry_timeout** Time to wait for an acknowledgment before attempting a retry. Defaults to 0.5 seconds
-- **wait_packet_sent_timeout** Timeout for waiting for a packet to transmit. Default is 0.5 seconds
+- **cad_timeout** Timeout for channel activity detection. Default is 0
+- **retry_timeout** Time to wait for an acknowledgment before attempting a retry. Defaults to 0.2 seconds
+- **wait_packet_sent_timeout** Timeout for waiting for a packet to transmit. Default is 0.2 seconds
 
 ##### Methods
 ###### `send_to_wait(data, header_to, header_flags=0)`
 Send a message and block until an acknowledgment is received or a timeout occurs. Returns `True` if successful
 - ``data`` Your message. Can be a string or byte string
-- ``header_to`` Address of recipient (0-255). If address is 255, the message will be broadcast to all devices and **`send_to_wait`** will return `True` without waiting for acknowledgments
+- ``header_to`` Address of recipient (0-255). If address is 255, the message will be broadcast to all devices and **`send_to_wait()`** will return `True` without waiting for acknowledgments
 - ``header_flags`` Bitmask that can contain flags specific to your application
 
 ###### `send(data, header_to, header_id=0, header_flags=0)`
@@ -113,7 +120,7 @@ Blocks until a packet has finished transmitting. Returns `False` if a timeout oc
 Cleans up GPIO pins and closes the SPI connection. This should be called when your program exits.
 
 
-##### Callbacks
+#### Callbacks
 `on_recv(payload)` 
 Callback function that runs when a message is received
 `payload` has the following attributes:
