@@ -85,7 +85,7 @@ class LoRa(object):
         if self._tx_power > 23:
             self._tx_power = 23
 
-        if self._tx_power < 20:
+        if self._tx_power > 20:
             self._spi_write(REG_4D_PA_DAC, PA_DAC_ENABLE)
             self._tx_power -= 3
         else:
@@ -245,18 +245,14 @@ class LoRa(object):
             packet = self._spi_read(REG_00_FIFO, packet_len)
             self._spi_write(REG_12_IRQ_FLAGS, 0xff)  # Clear all IRQ flags
 
-            snr = self._spi_read(REG_19_PKT_SNR_VALUE) / 4
-            rssi = self._spi_read(REG_1A_PKT_RSSI_VALUE)
+            snr = self._spi_read(REG_19_PKT_SNR_VALUE)
+            if snr > 127:
+                snr = (256 - snr) * -1
+            snr /= 4
 
-            if snr < 0:
-                rssi = snr + rssi
-            else:
-                rssi = rssi * 16 / 15
-
-            if self._freq >= 779:
-                rssi = round(rssi - 157, 2)
-            else:
-                rssi = round(rssi - 164, 2)
+            # RSSI calculation for HopeRF RFM9x modules
+            # This is different for Semtech radios, it seems
+            rssi = -137 + self._spi_read(REG_1A_PKT_RSSI_VALUE)
 
             if packet_len >= 4:
                 header_to = packet[0]
