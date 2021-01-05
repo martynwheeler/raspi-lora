@@ -174,7 +174,6 @@ class LoRa(object):
             data = [b for b in self._encrypt(bytes(data))]
 
         payload = header + data
-
         self._spi_write(REG_0D_FIFO_ADDR_PTR, 0)
         self._spi_write(REG_00_FIFO, payload)
         self._spi_write(REG_22_PAYLOAD_LENGTH, len(payload))
@@ -250,9 +249,17 @@ class LoRa(object):
                 snr = (256 - snr) * -1
             snr /= 4
 
-            # RSSI calculation for HopeRF RFM9x modules
-            # This is different for Semtech radios, it seems
-            rssi = -137 + self._spi_read(REG_1A_PKT_RSSI_VALUE)
+
+            if snr < 0:
+                rssi = snr + rssi
+            else:
+                rssi = rssi * 16 / 15
+
+            if self._freq >= 779:
+                rssi = round(rssi - 157, 2)
+            else:
+                rssi = round(rssi - 164, 2)
+
 
             if packet_len >= 4:
                 header_to = packet[0]
@@ -261,7 +268,9 @@ class LoRa(object):
                 header_flags = packet[3]
                 message = bytes(packet[4:]) if packet_len > 4 else b''
 
-                if self._this_address != header_to or self._receive_all is True:
+
+                if (self._this_address != header_to) and ((header_to != BROADCAST_ADDRESS) or (self._receive_all is False)):
+
                     return
 
                 if self.crypto and len(message) % 16 == 0:

@@ -1,14 +1,19 @@
 import setuptools
 
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
 setuptools.setup(
     name='raspi-lora',
     version='0.2',
     packages=['raspi_lora'],
-    url='https://gitlab.com/the-plant/raspi-lora',
+    url='https://github.com/the-plant/raspi-lora',
     license='MIT',
     author='Anne Wood',
     author_email='anne.w@fastmail.us',
     description='LoRa RFM9x library for Raspberry Pi inspired by RadioHead',
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',
