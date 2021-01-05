@@ -1,10 +1,12 @@
 from enum import Enum
 
+
 class ModemConfig(Enum):
     Bw125Cr45Sf128 = (0x72, 0x74, 0x04)
     Bw500Cr45Sf128 = (0x92, 0x74, 0x04)
     Bw31_25Cr48Sf512 = (0x48, 0x94, 0x04)
     Bw125Cr48Sf4096 = (0x78, 0xc4, 0x0c)
+
 
 FLAGS_ACK = 0x80
 BROADCAST_ADDRESS = 255

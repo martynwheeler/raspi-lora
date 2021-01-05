@@ -1,4 +1,5 @@
 import time
+from enum import Enum
 import math
 from collections import namedtuple
 from random import random
@@ -6,12 +7,20 @@ from random import random
 import RPi.GPIO as GPIO
 import spidev
 
-from .lora_constants import *
+from .constants import *
+
+
+class ModemConfig(Enum):
+    Bw125Cr45Sf128 = (0x72, 0x74, 0x04)
+    Bw500Cr45Sf128 = (0x92, 0x74, 0x04)
+    Bw31_25Cr48Sf512 = (0x48, 0x94, 0x04)
+    Bw125Cr48Sf4096 = (0x78, 0xc4, 0x0c)
 
 
 class LoRa(object):
     def __init__(self, channel, interrupt, this_address, freq=915, tx_power=14,
-                 modem_config=ModemConfig.Bw125Cr45Sf128, acks=False, crypto=None):
+                 modem_config=ModemConfig.Bw125Cr45Sf128, receive_all=False,
+                 acks=False, crypto=None):
 
         self._channel = channel
         self._interrupt = interrupt
@@ -21,6 +30,7 @@ class LoRa(object):
         self._freq = freq
         self._tx_power = tx_power
         self._modem_config = modem_config
+        self._receive_all = receive_all
         self._acks = acks
 
         self._this_address = this_address
@@ -29,9 +39,10 @@ class LoRa(object):
         self._last_payload = None
         self.crypto = crypto
 
-        self.cad_timeout = 1
-        self.wait_packet_sent_timeout = 0.5
-        self.retry_timeout = 0.5
+        self.cad_timeout = 0
+        self.send_retries = 2
+        self.wait_packet_sent_timeout = 0.2
+        self.retry_timeout = 0.2
 
         # Setup the module
         GPIO.setmode(GPIO.BCM)
@@ -46,7 +57,7 @@ class LoRa(object):
         time.sleep(0.1)
 
         assert self._spi_read(REG_01_OP_MODE) == (MODE_SLEEP | LONG_RANGE_MODE), \
-            "LoRa radio initialization failed"
+            "LoRa initialization failed"
 
         self._spi_write(REG_0E_FIFO_TX_BASE_ADDR, 0)
         self._spi_write(REG_0F_FIFO_RX_BASE_ADDR, 0)
@@ -74,7 +85,7 @@ class LoRa(object):
         if self._tx_power > 23:
             self._tx_power = 23
 
-        if self._tx_power < 20:
+        if self._tx_power > 20:
             self._spi_write(REG_4D_PA_DAC, PA_DAC_ENABLE)
             self._tx_power -= 3
         else:
@@ -104,32 +115,36 @@ class LoRa(object):
             self._mode = MODE_RXCONTINUOUS
 
     def set_mode_cad(self):
-        self.set_mode_idle()
-        time.sleep(0.1)
-        self._spi_write(REG_01_OP_MODE, MODE_CAD)
-        self._spi_write(REG_40_DIO_MAPPING1, 0x80)  # Interrupt on CadDone
-        self._mode = MODE_CAD
+        if self._mode != MODE_CAD:
+            self._spi_write(REG_01_OP_MODE, MODE_CAD)
+            self._spi_write(REG_40_DIO_MAPPING1, 0x80)  # Interrupt on CadDone
+            self._mode = MODE_CAD
+
+    def _is_channel_active(self):
+        self.set_mode_cad()
+
+        while self._mode == MODE_CAD:
+            yield
+
+        return self._cad
 
     def wait_cad(self):
-        # Set the radio to CAD mode to check for channel activity
-        # self._cad will be True if activity was detected
         if not self.cad_timeout:
             return True
 
-        self.set_mode_cad()
-
         start = time.time()
-        while time.time() - start < self.cad_timeout:
-            if self._mode == MODE_STDBY and self._cad:
-                # Channel activity was detected, so we'll check again
-                self.set_mode_cad()
-            if self._mode == MODE_STDBY and not self._cad:
-                return True
-            time.sleep(0.1)
-        return False
+        for status in self._is_channel_active():
+            if time.time() - start < self.cad_timeout:
+                return False
+
+            if status is None:
+                time.sleep(0.1)
+                continue
+            else:
+                return status
 
     def wait_packet_sent(self):
-        # wait for `_handle_interrupt` to switch the mode back from MODE_TX
+        # wait for `_handle_interrupt` to switch the mode back
         start = time.time()
         while time.time() - start < self.wait_packet_sent_timeout:
             if self._mode != MODE_TX:
@@ -230,18 +245,14 @@ class LoRa(object):
             packet = self._spi_read(REG_00_FIFO, packet_len)
             self._spi_write(REG_12_IRQ_FLAGS, 0xff)  # Clear all IRQ flags
 
-            snr = self._spi_read(REG_19_PKT_SNR_VALUE) / 4
-            rssi = self._spi_read(REG_1A_PKT_RSSI_VALUE)
+            snr = self._spi_read(REG_19_PKT_SNR_VALUE)
+            if snr > 127:
+                snr = (256 - snr) * -1
+            snr /= 4
 
-            if snr < 0:
-                rssi = round(snr + rssi, 2)
-            else:
-                rssi = round(rssi * 16 / 15, 2)
-
-            if self._freq >= 779:
-                rssi -= 157
-            else:
-                rssi -= 164
+            # RSSI calculation for HopeRF RFM9x modules
+            # This is different for Semtech radios, it seems
+            rssi = -137 + self._spi_read(REG_1A_PKT_RSSI_VALUE)
 
             if packet_len >= 4:
                 header_to = packet[0]
@@ -250,11 +261,10 @@ class LoRa(object):
                 header_flags = packet[3]
                 message = bytes(packet[4:]) if packet_len > 4 else b''
 
-                if self._this_address not in [header_to, BROADCAST_ADDRESS]:
-                    # Message not for us
+                if self._this_address != header_to or self._receive_all is True:
                     return
 
-                if self.crypto and len(message) and len(message) % 16 == 0:
+                if self.crypto and len(message) % 16 == 0:
                     message = self._decrypt(message)
 
                 if self._acks and header_to == self._this_address and not header_flags & FLAGS_ACK:
@@ -282,3 +292,4 @@ class LoRa(object):
     def close(self):
         GPIO.cleanup()
         self.spi.close()
+
