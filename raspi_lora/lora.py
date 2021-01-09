@@ -71,6 +71,7 @@ class LoRa(object):
             time.sleep(0.01)
             GPIO.output(reset_pin,GPIO.HIGH)
             time.sleep(0.01)
+            GPIO.cleanup(reset_pin)
 
 
         self.spi = spidev.SpiDev()
