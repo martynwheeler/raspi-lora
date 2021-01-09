@@ -50,9 +50,9 @@ class LoRa(object):
         GPIO.setup(self._interrupt, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.add_event_detect(self._interrupt, GPIO.RISING, callback=self._handle_interrupt)
         
-        print("here")
         # reset the board
         if reset_pin:
+            print("Resetting")
             GPIO.setup(reset_pin,GPIO.OUT)
             GPIO.output(reset_pin,GPIO.LOW)
             time.sleep(0.01)
