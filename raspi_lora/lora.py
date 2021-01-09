@@ -71,6 +71,7 @@ class LoRa(object):
             time.sleep(0.01)
             GPIO.output(reset_pin,GPIO.HIGH)
             time.sleep(0.01)
+            print("here")
 
         self.spi = spidev.SpiDev()
         self.spi.open(0, self._channel)
