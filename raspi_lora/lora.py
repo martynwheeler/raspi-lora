@@ -18,10 +18,25 @@ class ModemConfig(Enum):
 
 
 class LoRa(object):
-    def __init__(self, channel, interrupt, this_address, freq=915, tx_power=14,
+    def __init__(self, channel, interrupt, this_address, reset_pin=None, freq=915, tx_power=14,
                  modem_config=ModemConfig.Bw125Cr45Sf128, receive_all=False,
                  acks=False, crypto=None):
-
+        """
+        Lora((channel, interrupt, this_address, freq=915, tx_power=14,
+                 modem_config=ModemConfig.Bw125Cr45Sf128, receive_all=False,
+                 acks=False, crypto=None, reset_pin=False)
+        channel: SPI channel [0 for CE0, 1 for CE1]
+        interrupt: Raspberry Pi interrupt pin (BCM)
+        this_address: set address for this device [0-254]
+        reset_pin: the Raspberry Pi port used to reset the RFM9x if connected
+        freq: frequency in MHz
+        tx_power: transmit power in dBm
+        modem_config: Check ModemConfig. Default is compatible with the Radiohead library
+        receive_all: if True, don't filter packets on address
+        acks: if True, request acknowledgments
+        crypto: if desired, an instance of pycrypto AES
+        """
+        
         self._channel = channel
         self._interrupt = interrupt
 
@@ -48,6 +63,14 @@ class LoRa(object):
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self._interrupt, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.add_event_detect(self._interrupt, GPIO.RISING, callback=self._handle_interrupt)
+        
+        # reset the board
+        if reset_pin:
+            GPIO.setup(reset_pin,GPIO.OUT)
+            GPIO.output(reset_pin,GPIO.LOW)
+            time.sleep(0.01)
+            GPIO.output(reset_pin,GPIO.HIGH)
+            time.sleep(0.01)
 
         self.spi = spidev.SpiDev()
         self.spi.open(0, self._channel)
