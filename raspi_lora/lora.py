@@ -66,7 +66,6 @@ class LoRa(object):
         
         # reset the board
         if reset_pin:
-            print("Resetting")
             GPIO.setup(reset_pin,GPIO.OUT)
             GPIO.output(reset_pin,GPIO.LOW)
             time.sleep(0.01)
