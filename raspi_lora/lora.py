@@ -18,10 +18,11 @@ class ModemConfig(Enum):
 
 
 class LoRa(object):
-    def __init__(self, channel, interrupt, this_address, freq=915, tx_power=14,
+    def __init__(self, channel, interrupt, this_address, reset_pin=None, freq=915, tx_power=14,
                  modem_config=ModemConfig.Bw125Cr45Sf128, receive_all=False,
                  acks=False, crypto=None):
 
+        
         self._channel = channel
         self._interrupt = interrupt
 
@@ -48,6 +49,16 @@ class LoRa(object):
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self._interrupt, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.add_event_detect(self._interrupt, GPIO.RISING, callback=self._handle_interrupt)
+        
+        print("here")
+        # reset the board
+        if reset_pin:
+            GPIO.setup(reset_pin,GPIO.OUT)
+            GPIO.output(reset_pin,GPIO.LOW)
+            time.sleep(0.01)
+            GPIO.output(reset_pin,GPIO.HIGH)
+            time.sleep(0.01)
+
 
         self.spi = spidev.SpiDev()
         self.spi.open(0, self._channel)
@@ -85,7 +96,7 @@ class LoRa(object):
         if self._tx_power > 23:
             self._tx_power = 23
 
-        if self._tx_power > 20:
+        if self._tx_power < 20:
             self._spi_write(REG_4D_PA_DAC, PA_DAC_ENABLE)
             self._tx_power -= 3
         else:
@@ -244,11 +255,8 @@ class LoRa(object):
             packet = self._spi_read(REG_00_FIFO, packet_len)
             self._spi_write(REG_12_IRQ_FLAGS, 0xff)  # Clear all IRQ flags
 
-            snr = self._spi_read(REG_19_PKT_SNR_VALUE)
-            if snr > 127:
-                snr = (256 - snr) * -1
-            snr /= 4
-
+            snr = self._spi_read(REG_19_PKT_SNR_VALUE) / 4
+            rssi = self._spi_read(REG_1A_PKT_RSSI_VALUE)
 
             if snr < 0:
                 rssi = snr + rssi
@@ -260,7 +268,6 @@ class LoRa(object):
             else:
                 rssi = round(rssi - 164, 2)
 
-
             if packet_len >= 4:
                 header_to = packet[0]
                 header_from = packet[1]
@@ -268,9 +275,7 @@ class LoRa(object):
                 header_flags = packet[3]
                 message = bytes(packet[4:]) if packet_len > 4 else b''
 
-
                 if (self._this_address != header_to) and ((header_to != BROADCAST_ADDRESS) or (self._receive_all is False)):
-
                     return
 
                 if self.crypto and len(message) % 16 == 0:
