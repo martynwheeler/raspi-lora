@@ -64,6 +64,7 @@ class LoRa(object):
         GPIO.setup(self._interrupt, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.add_event_detect(self._interrupt, GPIO.RISING, callback=self._handle_interrupt)
         
+        print("here")
         # reset the board
         if reset_pin:
             GPIO.setup(reset_pin,GPIO.OUT)
@@ -71,7 +72,7 @@ class LoRa(object):
             time.sleep(0.01)
             GPIO.output(reset_pin,GPIO.HIGH)
             time.sleep(0.01)
-            print("here")
+
 
         self.spi = spidev.SpiDev()
         self.spi.open(0, self._channel)
