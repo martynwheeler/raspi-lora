@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='raspi-lora',
-    version='0.2',
+    version='0.3',
     packages=['raspi_lora'],
     url='https://github.com/the-plant/raspi-lora',
     license='MIT',
